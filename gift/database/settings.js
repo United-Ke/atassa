@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS = {
     BOT_NAME: "𝐀𝐓𝐀𝐒𝐒𝐀-𝐌𝐃",
     FOOTER: "ᴘᴏᴡᴇʀᴇᴅ ʙʏ ɢɪғᴛᴇᴅ ᴛᴇᴄʜ",
     CAPTION: "©𝟐𝟎𝟐𝟓 𝐀𝐓𝐀𝐒𝐒𝐀-𝐌𝐃 𝐕𝟓",
-    BOT_PIC: "https://files.giftedtech.co.ke/image/u90mimage.jpg",
+    BOT_PIC: "https://files.gifted.co.ke/image/u90mimage.jpg",
     VERSION: packageJson.version || "5.0.0",
     MODE: config.MODE || "public",
     WARN_COUNT: "3",
