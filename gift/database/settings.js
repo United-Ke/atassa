@@ -62,7 +62,7 @@ const DEFAULT_SETTINGS = {
     AUTO_BLOCK: "",
     YT: "youtube.com/@giftedtechnexus",
     NEWSLETTER_JID: "120363426409647211@newsletter",
-    GC_JID: "GuS93JhyfyE56LOV3ZJTFZ",
+    GC_JID: "EyXMwZx0V556mTYY0eMQ5K",
     NEWSLETTER_URL: "https://whatsapp.com/channel/0029VbCpYtZLtOj5LDuj7Q1p",
     BOT_REPO: "mauricegift/atassa",
     PACK_NAME: "𝐀𝐓𝐀𝐒𝐒𝐀-𝐌𝐃",
