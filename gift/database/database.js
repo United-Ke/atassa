@@ -47,7 +47,7 @@ class DatabaseManager {
                 });
 
             // =========================================================
-            // POSTGRESQL / AIVEN / RENDER / NEON
+            // POSTGRESQL
             // =========================================================
             } else {
                 console.log("🗄️ DATABASE_URL detected.");
@@ -60,7 +60,7 @@ class DatabaseManager {
                         protocol: "postgres",
                         logging: false,
 
-                        // PostgreSQL SSL configuration
+                        // PostgreSQL SSL
                         dialectOptions: {
                             ssl: {
                                 require: true,
@@ -68,8 +68,7 @@ class DatabaseManager {
                             },
                         },
 
-                        // Keep the connection count low
-                        // to work well with free PostgreSQL plans.
+                        // Keep connections low
                         pool: {
                             max: 5,
                             min: 0,
@@ -81,7 +80,6 @@ class DatabaseManager {
                             max: 5,
                         },
 
-                        // Connection timeout
                         connectTimeout: 30000,
                     }
                 );
@@ -96,27 +94,35 @@ const DATABASE = DatabaseManager.getInstance();
 
 
 // =========================================================
-// TEST DATABASE CONNECTION
+// DATABASE HEALTH CHECK
 // =========================================================
-async function testDatabaseConnection() {
+
+const DATABASE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 minutes
+
+async function databaseHealthCheck() {
     try {
         await DATABASE.authenticate();
 
-        console.log("✅ Database connection successful.");
-
-        return true;
+        console.log("🟢 Database health check: OK");
     } catch (error) {
-        console.error("❌ Database connection failed.");
-        console.error("Error:", error.message);
-
-        return false;
+        console.error(
+            "🔴 Database health check failed:",
+            error.message
+        );
     }
 }
+
+// Initial database check
+databaseHealthCheck();
+
+// Check every 30 minutes
+setInterval(databaseHealthCheck, DATABASE_CHECK_INTERVAL);
 
 
 // =========================================================
 // SYNCHRONIZE DATABASE
 // =========================================================
+
 async function syncDatabase() {
     try {
         await DATABASE.authenticate();
@@ -139,8 +145,12 @@ async function syncDatabase() {
 }
 
 
+// =========================================================
+// EXPORT
+// =========================================================
+
 module.exports = {
     DATABASE,
     syncDatabase,
-    testDatabaseConnection,
+    testDatabaseConnection: databaseHealthCheck,
 };
