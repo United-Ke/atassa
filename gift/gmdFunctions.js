@@ -411,55 +411,197 @@ function formatBytes(bytes) {
     }
 
 async function loadSession() {
+    const sessionServerUrl = (
+        process.env.SESSION_SERVER_URL ||
+        "https://session.gifted.co.ke"
+     ).replace(/\/+$/, "");
+
     try {
-        if (fs.existsSync(sessionDir)) {
-            const allFiles = fs.readdirSync(sessionDir);
-            allFiles.forEach(f => {
-                try { fs.unlinkSync(path.join(sessionDir, f)); } catch (e) {}
-            });
+        if (!config.SESSION_ID || typeof config.SESSION_ID !== "string") {
+            console.error("❌ SESSION_ID is missing or invalid");
+            return false;
         }
 
-        if (!config.SESSION_ID || typeof config.SESSION_ID !== 'string') {
-            throw new Error("❌ SESSION_ID is missing or invalid");
+        let sessionId = config.SESSION_ID.trim();
+        const firstSeparator = sessionId.indexOf("~");
+
+        if (firstSeparator === -1) {
+            console.error(
+                "❌ Invalid session format. Expected: Gifted~..."
+            );
+            return false;
         }
 
-        let sessionId = config.SESSION_ID;
-        const [headerCheck, b64Check] = sessionId.split('~');
+        const header = sessionId.substring(0, firstSeparator);
+        const sessionData = sessionId.substring(firstSeparator + 1);
 
-        if (headerCheck !== "Gifted" || !b64Check) {
-            throw new Error("❌ Invalid session format. Expected 'Gifted~.....'");
+        if (header !== "Gifted" || !sessionData) {
+            console.error(
+                "❌ Invalid session format. Expected: Gifted~..."
+            );
+            return false;
         }
 
-        if (!b64Check.startsWith('H4sI')) {
-            const serverUrl = `https://session.gifted.co.ke/session/${b64Check}`;
-            const res = await axios.get(serverUrl, { timeout: 15000 });
-            const fetched = (res.data || '').toString().trim();
-            if (!fetched.startsWith('Gifted~H4sI')) {
-                throw new Error("❌ Session server returned invalid data");
+        /*
+         * If the configured session is not compressed, retrieve the
+         * compressed session from the external session server.
+         */
+        if (!sessionData.startsWith("H4sI")) {
+            const remoteUrl =
+                `${sessionServerUrl}/session/${encodeURIComponent(sessionData)}`;
+
+            let remoteSession = null;
+
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    console.log(
+                        `🔄 Loading remote session ` +
+                        `(attempt ${attempt}/3)...`
+                    );
+
+                    const response = await axios.get(remoteUrl, {
+                        timeout: 30000,
+                        responseType: "text",
+                        validateStatus: status =>
+                            status >= 200 && status < 300,
+                        headers: {
+                            Accept: "text/plain, application/json",
+                            "User-Agent": "atassa-md/5.0.0"
+                        }
+                    });
+
+                    remoteSession = String(response.data || "").trim();
+                    break;
+                } catch (error) {
+                    const errorCode = error.code || "UNKNOWN_ERROR";
+                    const errorMessage = error.message || "Unknown error";
+
+                    console.error(
+                        `⚠️ Session server attempt ${attempt}/3 failed:`,
+                        `${errorCode} - ${errorMessage}`
+                    );
+
+                    if (attempt < 3) {
+                        await new Promise(resolve =>
+                            setTimeout(resolve, attempt * 5000)
+                        );
+                    }
+                }
             }
-            sessionId = fetched;
+
+            /*
+             * If the remote server is unavailable, preserve the local
+             * session instead of deleting it or crashing the app.
+             */
+            if (!remoteSession) {
+                if (fs.existsSync(sessionPath)) {
+                    console.warn(
+                        "⚠️ Session server unavailable."
+                    );
+                    console.log(
+                        "✅ Existing local session will be used."
+                    );
+                    return false;
+                }
+
+                console.error(
+                    "❌ Session server unavailable and no local session exists."
+                );
+                console.error(
+                    "Restore session.gifted.co.ke or provide a new SESSION_ID."
+                );
+                return false;
+            }
+
+            if (!remoteSession.startsWith("Gifted~H4sI")) {
+                console.error(
+                    "❌ Session server returned invalid session data."
+                );
+
+                if (fs.existsSync(sessionPath)) {
+                    console.log(
+                        "✅ Existing local session will be used."
+                    );
+                    return false;
+                }
+
+                return false;
+            }
+
+            sessionId = remoteSession;
         }
 
-        const [header, b64data] = sessionId.split('~');
+        const separatorIndex = sessionId.indexOf("~");
+        const finalHeader = sessionId.substring(0, separatorIndex);
+        const encodedData = sessionId.substring(separatorIndex + 1);
 
-        if (header !== "Gifted" || !b64data) {
-            throw new Error("❌ Invalid session format. Expected 'Gifted~.....'");
+        if (finalHeader !== "Gifted" || !encodedData) {
+            console.error("❌ Final session format is invalid.");
+            return false;
         }
 
-        const cleanB64 = b64data.replace('...', '');
-        const compressedData = Buffer.from(cleanB64, 'base64');
-        const decompressedData = zlib.gunzipSync(compressedData);
+        const cleanBase64 = encodedData
+            .replace(/\.\.\./g, "")
+            .replace(/\s+/g, "");
+
+        let compressedData;
+        let decompressedData;
+
+        try {
+            compressedData = Buffer.from(cleanBase64, "base64");
+            decompressedData = zlib.gunzipSync(compressedData);
+        } catch (error) {
+            console.error(
+                "❌ Could not decode or decompress the session:",
+                error.message
+            );
+
+            if (fs.existsSync(sessionPath)) {
+                console.log(
+                    "✅ Existing local session will be used."
+                );
+                return false;
+            }
+
+            return false;
+        }
 
         if (!fs.existsSync(sessionDir)) {
             fs.mkdirSync(sessionDir, { recursive: true });
         }
 
-        fs.writeFileSync(sessionPath, decompressedData, "utf8");
-        console.log("✅ Session File Loaded");
+        /*
+         * Do not delete the existing session before the new session has
+         * been successfully downloaded and decompressed.
+         */
+        fs.writeFileSync(sessionPath, decompressedData);
 
-    } catch (e) {
-        console.error("❌ Session Error:", e.message);
-        throw e;
+        console.log("✅ Session file loaded successfully.");
+        return true;
+
+    } catch (error) {
+        console.error(
+            "❌ Unexpected session error:",
+            error.code || error.message
+        );
+
+        /*
+         * Never delete a working local session because the remote
+         * session server is temporarily unavailable.
+         */
+        if (fs.existsSync(sessionPath)) {
+            console.log(
+                "✅ Continuing with the existing local session."
+            );
+            return false;
+        }
+
+        console.warn(
+            "⚠️ No local session is available. " +
+            "The application can start, but authentication may be unavailable."
+        );
+
+        return false;
     }
 }
 
