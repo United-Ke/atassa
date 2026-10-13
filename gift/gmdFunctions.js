@@ -411,6 +411,7 @@ function formatBytes(bytes) {
     }
 
 async function loadSession() {
+    const SESSION_PREFIX = "KnightBot";
     const sessionServerUrl = (
         process.env.SESSION_SERVER_URL ||
         "https://session.gifted.co.ke"
@@ -423,28 +424,28 @@ async function loadSession() {
         }
 
         let sessionId = config.SESSION_ID.trim();
-        const firstSeparator = sessionId.indexOf("~");
+        const separatorIndex = sessionId.indexOf("~");
 
-        if (firstSeparator === -1) {
+        if (separatorIndex === -1) {
             console.error(
-                "❌ Invalid session format. Expected: Gifted~..."
+                "❌ Invalid session format. Expected: KnightBot~..."
             );
             return false;
         }
 
-        const header = sessionId.substring(0, firstSeparator);
-        const sessionData = sessionId.substring(firstSeparator + 1);
+        let prefix = sessionId.substring(0, separatorIndex);
+        let sessionData = sessionId.substring(separatorIndex + 1);
 
-        if (header !== "Gifted" || !sessionData) {
+        if (prefix !== SESSION_PREFIX || !sessionData) {
             console.error(
-                "❌ Invalid session format. Expected: Gifted~..."
+                "❌ Invalid session format. Expected: KnightBot~..."
             );
             return false;
         }
 
         /*
-         * If the configured session is not compressed, retrieve the
-         * compressed session from the external session server.
+         * A complete compressed session starts with H4sI.
+         * A short session ID requires the external session server.
          */
         if (!sessionData.startsWith("H4sI")) {
             const remoteUrl =
@@ -455,8 +456,7 @@ async function loadSession() {
             for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
                     console.log(
-                        `🔄 Loading remote session ` +
-                        `(attempt ${attempt}/3)...`
+                        `🔄 Loading remote session (attempt ${attempt}/3)...`
                     );
 
                     const response = await axios.get(remoteUrl, {
@@ -466,19 +466,16 @@ async function loadSession() {
                             status >= 200 && status < 300,
                         headers: {
                             Accept: "text/plain, application/json",
-                            "User-Agent": "atassa-md/5.0.0"
+                            "User-Agent": "KnightBot/1.0"
                         }
                     });
 
                     remoteSession = String(response.data || "").trim();
                     break;
                 } catch (error) {
-                    const errorCode = error.code || "UNKNOWN_ERROR";
-                    const errorMessage = error.message || "Unknown error";
-
                     console.error(
-                        `⚠️ Session server attempt ${attempt}/3 failed:`,
-                        `${errorCode} - ${errorMessage}`
+                        `⚠️ Session attempt ${attempt}/3 failed:`,
+                        `${error.code || "ERROR"} - ${error.message}`
                     );
 
                     if (attempt < 3) {
@@ -489,17 +486,10 @@ async function loadSession() {
                 }
             }
 
-            /*
-             * If the remote server is unavailable, preserve the local
-             * session instead of deleting it or crashing the app.
-             */
             if (!remoteSession) {
                 if (fs.existsSync(sessionPath)) {
                     console.warn(
-                        "⚠️ Session server unavailable."
-                    );
-                    console.log(
-                        "✅ Existing local session will be used."
+                        "⚠️ Session server unavailable; using local session."
                     );
                     return false;
                 }
@@ -507,62 +497,62 @@ async function loadSession() {
                 console.error(
                     "❌ Session server unavailable and no local session exists."
                 );
+                return false;
+            }
+
+            const remoteSeparator = remoteSession.indexOf("~");
+
+            if (remoteSeparator === -1) {
+                console.error("❌ Remote session has invalid format.");
+                return false;
+            }
+
+            const remoteData =
+                remoteSession.substring(remoteSeparator + 1).trim();
+
+            if (!remoteData.startsWith("H4sI")) {
                 console.error(
-                    "Restore session.gifted.co.ke or provide a new SESSION_ID."
+                    "❌ Remote server did not return compressed session data."
                 );
                 return false;
             }
 
-            if (!remoteSession.startsWith("Gifted~H4sI")) {
-                console.error(
-                    "❌ Session server returned invalid session data."
-                );
-
-                if (fs.existsSync(sessionPath)) {
-                    console.log(
-                        "✅ Existing local session will be used."
-                    );
-                    return false;
-                }
-
-                return false;
-            }
-
-            sessionId = remoteSession;
+            sessionData = remoteData;
         }
 
-        const separatorIndex = sessionId.indexOf("~");
-        const finalHeader = sessionId.substring(0, separatorIndex);
-        const encodedData = sessionId.substring(separatorIndex + 1);
-
-        if (finalHeader !== "Gifted" || !encodedData) {
-            console.error("❌ Final session format is invalid.");
-            return false;
-        }
-
-        const cleanBase64 = encodedData
+        const cleanBase64 = sessionData
             .replace(/\.\.\./g, "")
             .replace(/\s+/g, "");
 
         let compressedData;
-        let decompressedData;
 
         try {
             compressedData = Buffer.from(cleanBase64, "base64");
-            decompressedData = zlib.gunzipSync(compressedData);
+
+            if (!compressedData.length) {
+                throw new Error("Decoded session is empty");
+            }
         } catch (error) {
             console.error(
-                "❌ Could not decode or decompress the session:",
+                "❌ Invalid Base64 session data:",
                 error.message
             );
+            return false;
+        }
 
-            if (fs.existsSync(sessionPath)) {
-                console.log(
-                    "✅ Existing local session will be used."
-                );
-                return false;
+        let decompressedData;
+
+        try {
+            decompressedData = zlib.gunzipSync(compressedData);
+
+            if (!decompressedData.length) {
+                throw new Error("Decompressed session is empty");
             }
-
+        } catch (error) {
+            console.error(
+                "❌ Could not decompress session data:",
+                error.message
+            );
             return false;
         }
 
@@ -571,35 +561,26 @@ async function loadSession() {
         }
 
         /*
-         * Do not delete the existing session before the new session has
-         * been successfully downloaded and decompressed.
+         * Write only after the remote session has been successfully
+         * downloaded and decompressed.
          */
         fs.writeFileSync(sessionPath, decompressedData);
 
-        console.log("✅ Session file loaded successfully.");
+        console.log("✅ KnightBot session file loaded successfully.");
         return true;
 
     } catch (error) {
         console.error(
-            "❌ Unexpected session error:",
+            "❌ KnightBot session error:",
             error.code || error.message
         );
 
-        /*
-         * Never delete a working local session because the remote
-         * session server is temporarily unavailable.
-         */
         if (fs.existsSync(sessionPath)) {
-            console.log(
-                "✅ Continuing with the existing local session."
+            console.warn(
+                "⚠️ Keeping the existing local session."
             );
             return false;
         }
-
-        console.warn(
-            "⚠️ No local session is available. " +
-            "The application can start, but authentication may be unavailable."
-        );
 
         return false;
     }
