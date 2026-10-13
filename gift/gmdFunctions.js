@@ -411,7 +411,7 @@ function formatBytes(bytes) {
     }
 
 async function loadSession() {
-    const SESSION_PREFIX = "KnightBot";
+    const SESSION_PREFIX = "KnightBot!";
     const sessionServerUrl = (
         process.env.SESSION_SERVER_URL ||
         "https://session.gifted.co.ke"
@@ -424,27 +424,25 @@ async function loadSession() {
         }
 
         let sessionId = config.SESSION_ID.trim();
-        const separatorIndex = sessionId.indexOf("~");
 
-        if (separatorIndex === -1) {
+        if (!sessionId.startsWith(SESSION_PREFIX)) {
             console.error(
-                "❌ Invalid session format. Expected: KnightBot~..."
+                "❌ Invalid session format. Expected: KnightBot!..."
             );
             return false;
         }
 
-        let prefix = sessionId.substring(0, separatorIndex);
-        let sessionData = sessionId.substring(separatorIndex + 1);
+        let sessionData = sessionId.substring(SESSION_PREFIX.length);
 
-        if (prefix !== SESSION_PREFIX || !sessionData) {
+        if (!sessionData) {
             console.error(
-                "❌ Invalid session format. Expected: KnightBot~..."
+                "❌ SESSION_ID contains no session data."
             );
             return false;
         }
 
         /*
-         * A complete compressed session starts with H4sI.
+         * A full compressed session starts with H4sI.
          * A short session ID requires the external session server.
          */
         if (!sessionData.startsWith("H4sI")) {
@@ -500,59 +498,46 @@ async function loadSession() {
                 return false;
             }
 
-            const remoteSeparator = remoteSession.indexOf("~");
+            /*
+             * Accept the remote response whether it contains
+             * KnightBot!, Gifted~, or another prefix.
+             */
+            const remoteSeparator = remoteSession.search(/[~!]/);
 
             if (remoteSeparator === -1) {
-                console.error("❌ Remote session has invalid format.");
+                console.error(
+                    "❌ Remote session has invalid format."
+                );
                 return false;
             }
 
-            const remoteData =
-                remoteSession.substring(remoteSeparator + 1).trim();
+            sessionData = remoteSession
+                .substring(remoteSeparator + 1)
+                .trim();
 
-            if (!remoteData.startsWith("H4sI")) {
+            if (!sessionData.startsWith("H4sI")) {
                 console.error(
                     "❌ Remote server did not return compressed session data."
                 );
                 return false;
             }
-
-            sessionData = remoteData;
         }
 
         const cleanBase64 = sessionData
             .replace(/\.\.\./g, "")
             .replace(/\s+/g, "");
 
-        let compressedData;
+        const compressedData = Buffer.from(cleanBase64, "base64");
 
-        try {
-            compressedData = Buffer.from(cleanBase64, "base64");
-
-            if (!compressedData.length) {
-                throw new Error("Decoded session is empty");
-            }
-        } catch (error) {
-            console.error(
-                "❌ Invalid Base64 session data:",
-                error.message
-            );
+        if (!compressedData.length) {
+            console.error("❌ Session data is empty.");
             return false;
         }
 
-        let decompressedData;
+        const decompressedData = zlib.gunzipSync(compressedData);
 
-        try {
-            decompressedData = zlib.gunzipSync(compressedData);
-
-            if (!decompressedData.length) {
-                throw new Error("Decompressed session is empty");
-            }
-        } catch (error) {
-            console.error(
-                "❌ Could not decompress session data:",
-                error.message
-            );
+        if (!decompressedData.length) {
+            console.error("❌ Decompressed session data is empty.");
             return false;
         }
 
@@ -560,18 +545,17 @@ async function loadSession() {
             fs.mkdirSync(sessionDir, { recursive: true });
         }
 
-        /*
-         * Write only after the remote session has been successfully
-         * downloaded and decompressed.
-         */
         fs.writeFileSync(sessionPath, decompressedData);
 
-        console.log("✅ KnightBot session file loaded successfully.");
+        console.log(
+            "✅ KnightBot! session file loaded successfully."
+        );
+
         return true;
 
     } catch (error) {
         console.error(
-            "❌ KnightBot session error:",
+            "❌ KnightBot! session error:",
             error.code || error.message
         );
 
