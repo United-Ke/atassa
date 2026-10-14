@@ -622,7 +622,18 @@ function setupCommandHandler(Gifted) {
         if (type === "append") return;
 
         const ms = messages[0];
-        if (!ms?.message || !ms?.key) return;
+
+if (!ms?.message || !ms?.key) {
+    console.log("⚠️ Message ignored: missing message or key");
+    return;
+}
+
+console.log("📩 MESSAGE RECEIVED:", {
+    type,
+    from: ms.key.remoteJid,
+    fromMe: ms.key.fromMe,
+    messageId: ms.key.id
+});
 
         const messageId = ms.key.id;
         if (processedMessages.has(messageId)) return;
@@ -660,6 +671,13 @@ function setupCommandHandler(Gifted) {
             quotedKey,
             quotedUser,
         } = serialized;
+        console.log("📝 MESSAGE PARSED:", {
+    from,
+    body,
+    isCommand,
+    command,
+    args
+});
 
         const groupData = await getGroupInfo(Gifted, from, botId, rawSender);
         const {
@@ -751,11 +769,56 @@ function setupCommandHandler(Gifted) {
         }
 
         if (isCommand && command) {
-            const gmd = findCommand(command);
-            if (!gmd) return;
+    console.log("🔍 COMMAND DETECTED:", {
+        command,
+        args,
+        mode: settings.MODE,
+        isSuperUser,
+        sender
+    });
 
-            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser)
-                return;
+    const gmd = findCommand(command);
+
+    if (!gmd) {
+        console.log("⚠️ COMMAND NOT FOUND:", command);
+
+        try {
+            await Gifted.sendMessage(
+                from,
+                {
+                    text: `❌ Command not found: ${command}`
+                },
+                { quoted: ms }
+            );
+        } catch (error) {
+            console.error("❌ Could not send unknown-command reply:", error);
+        }
+
+        return;
+    }
+
+    if (
+        settings.MODE?.toLowerCase() === "private" &&
+        !isSuperUser
+    ) {
+        console.log(
+            "⚠️ Command blocked because bot mode is private."
+        );
+
+        try {
+            await Gifted.sendMessage(
+                from,
+                {
+                    text: "🔒 The bot is currently in private mode."
+                },
+                { quoted: ms }
+            );
+        } catch (error) {
+            console.error("❌ Could not send private-mode reply:", error);
+        }
+
+        return;
+    }
 
             try {
                 const helpers = createHelpers(Gifted, ms, from);
